@@ -3,12 +3,13 @@ Patient chatbot + doctor "since last visit" summary. Owner: Samprada.
 
 Flow for every patient message:
   1. Save the message to memory (so it becomes history too)
-  2. Danger-word check → urgent reply + SOS entry (no LLM involved)
+  2. Danger check (words + heart rate/fever numbers) → urgent reply + SOS entry (no LLM)
   3. Otherwise → memory.ask() (Hindsight reflect with directives)
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
 from core import db, memory
@@ -34,7 +35,19 @@ PATIENT_CONTEXT = (
 
 def _is_danger(text: str) -> bool:
     t = text.lower()
-    return any(term in t for term in DANGER_TERMS)
+    if any(term in t for term in DANGER_TERMS):
+        return True
+    # Heart rate: "140 bpm", "heart rate 140", "pulse is 130"
+    for m in re.finditer(r"(?:heart ?rate|pulse|hr)\D{0,15}(\d{2,3})|(\d{2,3})\s*bpm", t):
+        bpm = int(m.group(1) or m.group(2))
+        if bpm >= 120 or bpm <= 45:
+            return True
+    # Fever: "fever 101", "temp 38.5"
+    for m in re.finditer(r"(?:fever|temp(?:erature)?)\D{0,15}(\d{2,3}(?:\.\d)?)", t):
+        v = float(m.group(1))
+        if v >= 100.4 or 38.0 <= v < 45:
+            return True
+    return False
 
 
 def handle_message(patient_id: int, text: str, role: Role = Role.PATIENT) -> ChatReply:
@@ -53,9 +66,25 @@ def since_last_visit(patient_id: int) -> str:
     """Doctor-facing factual summary of everything recorded since the last review."""
     since = db.last_reviewed(patient_id) or (datetime.now() - timedelta(days=30))
     question = (
-        f"Summarize everything recorded for this patient since {since:%d %b %Y}. "
-        "Use these headings: Missed or late medicines; Symptoms reported (with dates and any "
-        "repeating patterns); New reports (values only, no interpretation); Diary and visit notes; "
-        "Questions or SOS events. Be factual and brief. Do not interpret or recommend."
+        f"Write a clinical handover summary of everything recorded for this patient "
+        f"from {since:%d %b %Y} to today. The reader is the treating doctor. "
+        "Refer to the patient in the third person ('the patient'), never 'you'.\n\n"
+        "Use exactly these headings:\n"
+        "1. Medication adherence: count missed and late doses per medicine, note whether "
+        "they cluster (e.g. evening doses, specific days), and include missed checklist items like water intake.\n"
+        "2. Symptoms: each symptom with the dates reported. Then, for each repeating symptom, "
+        "list every chemotherapy infusion or cycle-start date and state how many days after it "
+        "the symptom was reported (e.g. 'nausea 1-2 days after both infusions: 3 Sep, 24 Sep'). "
+        "Prefer this treatment-linked pattern over time-of-day patterns.\n"
+        "3. Lab and scan reports: recorded values with dates only. No interpretation.\n"
+        "4. Patient diary and care-team notes: brief points with who recorded them and when.\n"
+        "5. Patient questions and SOS events: with dates.\n\n"
+        "Only use information recorded in memory. If a section has nothing, write 'None recorded'. "
+        "Do not interpret, diagnose or recommend."
     )
-    return memory.ask(patient_id, question, context="The person asking is the treating doctor preparing for a consultation.")
+    return memory.ask(
+        patient_id,
+        question,
+        context="The person asking is the treating doctor preparing for a consultation. "
+                "Write for a clinician, in the third person.",
+    )
