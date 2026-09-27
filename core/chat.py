@@ -71,13 +71,27 @@ def handle_message(patient_id: int, text: str, role: Role = Role.PATIENT) -> Cha
 def since_last_visit(patient_id: int) -> str:
     """Doctor-facing factual summary of everything recorded since the last review."""
     since = db.last_reviewed(patient_id) or (datetime.now() - timedelta(days=30))
+    counts = db.adherence_text(patient_id, since)
+    if counts:
+        # Exact numbers from the app's daily logs: the AI must not recount.
+        adherence_rule = (
+            "for the days listed below, use EXACTLY these verified counts from the app's "
+            "daily logs; do not recount or change them. For any other days, count missed and "
+            "late doses from the check-ins recorded in memory and add them, keeping each date. "
+            "Then note whether misses cluster (e.g. evening doses) and include missed checklist "
+            "items like water intake.\n" + counts
+        )
+    else:
+        adherence_rule = (
+            "count missed and late doses per medicine, note whether they cluster "
+            "(e.g. evening doses, specific days), and include missed checklist items like water intake."
+        )
     question = (
         f"Write a clinical handover summary of everything recorded for this patient "
         f"from {since:%d %b %Y} to today. The reader is the treating doctor. "
         "Refer to the patient in the third person ('the patient'), never 'you'.\n\n"
         "Use exactly these headings:\n"
-        "1. Medication adherence: count missed and late doses per medicine, note whether "
-        "they cluster (e.g. evening doses, specific days), and include missed checklist items like water intake.\n"
+        f"1. Medication adherence: {adherence_rule}\n"
         "2. Symptoms: each symptom with the dates reported. Then, for each repeating symptom, "
         "list every chemotherapy infusion or cycle-start date and state how many days after it "
         "the symptom was reported (e.g. 'nausea 1-2 days after both infusions: 3 Sep, 24 Sep'). "

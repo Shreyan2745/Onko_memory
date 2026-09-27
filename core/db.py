@@ -165,3 +165,51 @@ def last_reviewed(patient_id: int) -> datetime | None:
     with _conn() as c:
         r = c.execute("SELECT reviewed_at FROM reviews WHERE patient_id = ?", (patient_id,)).fetchone()
     return datetime.fromisoformat(r["reviewed_at"]) if r else None
+
+
+# ─────────────── Adherence (exact counts for the doctor) ───────────────
+
+def adherence_counts(patient_id: int, since: datetime) -> dict[str, dict]:
+    """
+    Exact missed/late counts per checklist item from submitted daily logs.
+    Returns {label: {"done": n, "missed": [days], "late": [days], "slot": str}}.
+    Only days on or after `since` are counted.
+    """
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT day, payload FROM daily_logs WHERE patient_id = ? AND day >= ? ORDER BY day",
+            (patient_id, since.date().isoformat()),
+        ).fetchall()
+    out: dict[str, dict] = {}
+    for r in rows:
+        for ci in json.loads(r["payload"]).get("checklist", []):
+            rec = out.setdefault(ci["label"], {"done": 0, "missed": [], "late": [], "slot": ci.get("slot", "")})
+            status = ci.get("status")
+            if status == CheckStatus.DONE.value:
+                rec["done"] += 1
+            elif status in (CheckStatus.MISSED.value, CheckStatus.LATE.value):
+                rec[status].append(r["day"])
+    return out
+
+
+def adherence_text(patient_id: int, since: datetime) -> str:
+    """Adherence counts as plain text for the summary prompt. '' if no logs."""
+    counts = adherence_counts(patient_id, since)
+    with _conn() as c:
+        days = [r["day"] for r in c.execute(
+            "SELECT day FROM daily_logs WHERE patient_id = ? AND day >= ? ORDER BY day",
+            (patient_id, since.date().isoformat()),
+        ).fetchall()]
+    if not days:
+        return ""
+    fmt = lambda ds: ", ".join(datetime.fromisoformat(d).strftime("%d %b") for d in ds) or "none"
+    lines = [f"Days with a submitted daily log: {fmt(days)}"]
+    for label, rec in counts.items():
+        if not rec["missed"] and not rec["late"]:
+            lines.append(f"- {label}: done on all {rec["done"]} logged days")
+            continue
+        lines.append(
+            f"- {label}: taken {rec['done']}, missed {len(rec['missed'])} ({fmt(rec['missed'])}), "
+            f"late {len(rec['late'])} ({fmt(rec['late'])})"
+        )
+    return "\n".join(lines)
