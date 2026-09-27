@@ -28,8 +28,14 @@ EMERGENCY_REPLY = (
 )
 
 PATIENT_CONTEXT = (
-    "The person asking is the patient. Answer from what is recorded in memory, "
-    "cite who recorded it and when, and follow all directives."
+    "The person asking is the patient, who prefers short, simple explanations. "
+    "Reply in under 100 words, as 2-4 short sentences or a few short bullets. No headings.\n"
+    "Answer from what is recorded in memory and say who recorded each fact and when.\n"
+    "If they ask why they feel a symptom: do not diagnose, but do point out when it was "
+    "reported relative to treatment dates, e.g. 'You logged nausea 1-2 days after your "
+    "infusions on 3 Sep and 24 Sep.' Then suggest mentioning it to the care team.\n"
+    "For routine medicine questions, be calm: suggest checking with the care team, "
+    "not 'immediately', unless it sounds like an emergency."
 )
 
 
