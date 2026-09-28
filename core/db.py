@@ -206,7 +206,7 @@ def adherence_text(patient_id: int, since: datetime) -> str:
     lines = [f"Days with a submitted daily log: {fmt(days)}"]
     for label, rec in counts.items():
         if not rec["missed"] and not rec["late"]:
-            lines.append(f"- {label}: done on all {rec["done"]} logged days")
+            lines.append(f"- {label}: done on all {rec['done']} logged days")
             continue
         lines.append(
             f"- {label}: taken {rec['done']}, missed {len(rec['missed'])} ({fmt(rec['missed'])}), "

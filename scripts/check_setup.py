@@ -10,7 +10,15 @@ from core.contracts import Patient
 def main() -> None:
     print("── Hindsight ──")
     if not memory.is_online():
-        print("✗ Not configured. Set HINDSIGHT_BASE_URL (and HINDSIGHT_API_KEY for Cloud) in .env")
+        try:
+            import hindsight_client  # noqa: F401
+        except ImportError:
+            print("✗ Package missing. Run: pip install -r requirements.txt")
+        else:
+            if not config.HINDSIGHT_BASE_URL:
+                print(f"✗ HINDSIGHT_BASE_URL is empty. Check the exact name in {config.ROOT / '.env'}")
+            if not config.HINDSIGHT_API_KEY:
+                print("! HINDSIGHT_API_KEY is empty (needed for Hindsight Cloud)")
     else:
         bank = f"{config.HINDSIGHT_BANK_PREFIX}-setup-check"
         memory._call("aretain", bank_id=bank, content="Setup check: the team name is 404 Found.", retain_async=False)
