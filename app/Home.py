@@ -44,7 +44,7 @@ else:
         with c1:
             st.markdown(f'<div class="eyebrow">▣ &nbsp; Active Patient Context &nbsp; • &nbsp; {selected.name} &nbsp; <code>{selected.id}</code></div><div style="font-size:.76rem;margin-top:.3rem">{selected.age} yrs &nbsp;·&nbsp; {selected.diagnosis or "Care journey"}<br><span style="color:#60766d">OnKo memory uses patient-specific verified records. All answers and daily careflows adapt to this approved plan.</span></div>', unsafe_allow_html=True)
         with c2:
-            picked = st.selectbox("Change patient", patients, index=0, format_func=lambda p: p.name, label_visibility="collapsed")
+            picked = st.selectbox("Change patient", patients, index=0, format_func=lambda p: f"{p.name} (ID {p.id})", label_visibility="collapsed")
             if picked.id != selected.id:
                 st.session_state.patient = picked
                 st.rerun()
