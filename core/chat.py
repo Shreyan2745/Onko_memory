@@ -50,6 +50,11 @@ DANGER_PATTERNS = [
 ]
 
 
+# Questions about taking / missing medicines get exact counts from the daily logs.
+ADHERENCE_QUESTION = re.compile(
+    r"\b(miss\w*|forg[eo]t\w*|skip\w*|late|on time|adherence|took|taken|taking)\b", re.I)
+
+
 def _is_danger(text: str) -> bool:
     t = text.lower()
     if any(term in t for term in DANGER_TERMS):
@@ -76,8 +81,16 @@ def handle_message(patient_id: int, text: str, role: Role = Role.PATIENT) -> Cha
         memory.save_entry(Entry(patient_id, f"SOS / danger words in message: {text}", role, EntryType.SOS))
         return ChatReply(EMERGENCY_REPLY, is_emergency=True, flagged_for_doctor=True)
 
-    answer = memory.ask(patient_id, text, context=PATIENT_CONTEXT)
-    memory.save_entry(Entry(patient_id, f"OnKo answered: {answer}", role, EntryType.CHAT, metadata={"speaker": "assistant"}))
+    context = PATIENT_CONTEXT
+    if ADHERENCE_QUESTION.search(text):
+        # Exact missed AND late counts from the daily logs, so the answer doesn't undercount.
+        counts = db.adherence_text(patient_id, datetime.now() - timedelta(days=60))
+        if counts:
+            context += ("\nVerified medicine check-ins from the app's daily logs (use these exact "
+                        "numbers; mention both missed and late doses with their dates):\n" + counts)
+    answer = memory.ask(patient_id, text, context=context)
+    # OnKo's own reply is NOT saved to memory: saved replies were later cited as if they
+    # were clinical records ("as noted by the assistant"). The patient's question is saved above.
     return ChatReply(answer)
 
 
