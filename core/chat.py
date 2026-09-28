@@ -66,8 +66,10 @@ def _is_danger(text: str) -> bool:
         bpm = int(m.group(1) or m.group(2))
         if bpm >= 120 or bpm <= 45:
             return True
-    # Fever: "fever 101", "temp 38.5"
-    for m in re.finditer(r"(?:fever|temp(?:erature)?)\D{0,15}(\d{2,3}(?:\.\d)?)", t):
+    # Fever: "fever 101", "temp 38.5", and number-first "101 fever", "38.5 degree temperature"
+    fever_after = r"(?:fever|temp(?:erature)?)\D{0,15}(\d{2,3}(?:\.\d)?)"
+    fever_before = r"(\d{2,3}(?:\.\d)?)\s*(?:°|deg\w*)?\s*(?:f|c)?\b[^.\d]{0,12}\b(?:fever|temp(?:erature)?)"
+    for m in [*re.finditer(fever_after, t), *re.finditer(fever_before, t)]:
         v = float(m.group(1))
         if v >= 100.4 or 38.0 <= v < 45:
             return True
