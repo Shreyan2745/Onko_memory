@@ -39,9 +39,22 @@ PATIENT_CONTEXT = (
 )
 
 
+# Word-form variants the plain term list misses ("vomited blood", "coughed up blood", ...)
+DANGER_PATTERNS = [
+    r"\b(vomit\w*|threw up|throwing up|throw up|puk\w*)\b.{0,25}\bblood",
+    r"\bblood\b.{0,15}\b(vomit\w*|puk\w*)",
+    r"\bcough\w*\b.{0,15}\bblood",
+    r"\bblood\b.{0,10}\b(in|with)\b.{0,10}\b(stool|motion|poop|urine)",
+    r"\b(can'?t|cannot|won'?t) stop bleeding",
+    r"\b(short of breath|hard to breathe|difficulty breathing|trouble breathing|passed out|having (a )?fits?)\b",
+]
+
+
 def _is_danger(text: str) -> bool:
     t = text.lower()
     if any(term in t for term in DANGER_TERMS):
+        return True
+    if any(re.search(p, t) for p in DANGER_PATTERNS):
         return True
     # Heart rate: "140 bpm", "heart rate 140", "pulse is 130"
     for m in re.finditer(r"(?:heart ?rate|pulse|hr)\D{0,15}(\d{2,3})|(\d{2,3})\s*bpm", t):
