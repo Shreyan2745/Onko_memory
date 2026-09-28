@@ -170,6 +170,9 @@ class ChatReply:
 #   ensure_bank(patient: Patient) -> str
 #   save_entry(entry: Entry) -> None
 #   ask(patient_id: int, question: str, context: str = "") -> str
+#   recent_saves(patient_id: int, limit: int = 5) -> list[dict]      # {type, source, when, text}
+#   last_trace(patient_id: int) -> dict | None                        # {question, facts, directives, seconds, offline}
+#   learned_patterns(patient_id: int, limit: int = 6) -> list[str]    # Hindsight observations
 #
 # core/schedule.py      (Samprada)
 #   build_checklist(items: list[CarePlanItem], day: str) -> list[ChecklistItem]
