@@ -1,7 +1,8 @@
 # Owner: Samprada. Tell the team before adding anything.
-streamlit>=1.40
-pandas>=2.0
-hindsight-client
-groq>=0.11
-pypdf>=4.0
-python-dotenv>=1.0
+# Pinned to the versions tested on 27 Sep 2026 so everyone runs the same code.
+streamlit==1.64.0
+pandas==3.0.6
+hindsight-client==0.10.1
+groq==1.7.0
+pypdf==6.19.0
+python-dotenv==1.2.3

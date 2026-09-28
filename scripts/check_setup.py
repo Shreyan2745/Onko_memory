@@ -12,8 +12,7 @@ def main() -> None:
     if not memory.is_online():
         print("✗ Not configured. Set HINDSIGHT_BASE_URL (and HINDSIGHT_API_KEY for Cloud) in .env")
     else:
-        from hindsight_client import Hindsight
-        c = Hindsight(base_url=config.HINDSIGHT_BASE_URL, api_key=config.HINDSIGHT_API_KEY)
+        c = memory._get_client()  # shared client, closed cleanly on exit
         bank = f"{config.HINDSIGHT_BANK_PREFIX}-setup-check"
         c.retain(bank_id=bank, content="Setup check: the team name is 404 Found.", retain_async=False)
         print("✓ retain ok")

@@ -12,6 +12,7 @@ Docs: https://hindsight.vectorize.io/sdks/python
 
 from __future__ import annotations
 
+import atexit
 import logging
 
 from core import config
@@ -73,6 +74,18 @@ def _get_client():
     if _client is None and Hindsight is not None and config.HINDSIGHT_BASE_URL:
         _client = Hindsight(base_url=config.HINDSIGHT_BASE_URL, api_key=config.HINDSIGHT_API_KEY, timeout=60.0)
     return _client
+
+
+@atexit.register
+def close() -> None:
+    """Close the Hindsight HTTP session on exit (stops 'Unclosed client session' warnings)."""
+    global _client
+    if _client is not None:
+        try:
+            _client.close()
+        except Exception:
+            pass
+        _client = None
 
 
 def is_online() -> bool:
