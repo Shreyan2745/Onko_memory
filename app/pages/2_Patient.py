@@ -13,9 +13,26 @@ role, patient = require_role(Role.PATIENT)
 today = date.today().isoformat()
 app_header("Patient Workspace", patient)
 
+# Days of care history = since the earliest approved care-plan item (0 if no plan yet).
+def _days_remembered(patient_id: int) -> int:
+    """Days since the earliest approved care-plan item started (0 if no plan yet)."""
+    starts = []
+    for item in db.list_plan_items(patient_id):
+        try:
+            starts.append(date.fromisoformat(item.start_date))
+        except (TypeError, ValueError):
+            continue  # blank or non-ISO date typed by hand
+    return max((date.today() - min(starts)).days, 0) + 1 if starts else 0
+
+
+days_remembered = _days_remembered(patient.id)
+memory_badge = f"◌ {days_remembered} days remembered" if days_remembered else "◌ New patient"
+_hour = datetime.now().hour
+greeting = "Good morning" if _hour < 12 else "Good afternoon" if _hour < 17 else "Good evening"
+
 st.markdown(
-    f'<div class="hero-title">Good morning, {patient.name.split()[0]} '
-    '<span class="badge">◌ 28 days remembered</span></div>'
+    f'<div class="hero-title">{greeting}, {patient.name.split()[0]} '
+    f'<span class="badge">{memory_badge}</span></div>'
     f'<div class="hero-sub">Let\'s check in for today · {date.today():%A, %d %B}</div>',
     unsafe_allow_html=True,
 )
@@ -91,7 +108,7 @@ with chat_col:
         st.markdown(
             '<div class="chat-head"><div class="chat-head-row">'
             '<div class="chat-head-title"><span class="chat-head-icon">✣</span>Ask OnKo</div>'
-            '<span class="chat-indexed">● 28 days indexed</span></div>'
+            f'<span class="chat-indexed">● {f"{days_remembered} days indexed" if days_remembered else "just started"}</span></div>'
             '<p>Ask about appointments, medications, past symptoms, or lab results.</p></div>',
             unsafe_allow_html=True,
         )
