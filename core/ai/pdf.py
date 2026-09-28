@@ -8,8 +8,10 @@ Scanned (image-only) PDFs return empty text for now — add OCR later if time al
 from __future__ import annotations
 
 import io
+from datetime import date
 
 from core import config
+from core.ai.extract import to_iso_date
 from core.ai.llm import chat_json
 from core.contracts import ExtractedReport, ReportValue
 
@@ -33,7 +35,9 @@ def extract_report(text: str) -> ExtractedReport:
         return ExtractedReport("CBC (stub)", "", [ReportValue("Hb", "9.2", "g/dL")], text)
     data = chat_json(SYSTEM_PROMPT, text[:12000])
     values = [
-        ReportValue(str(v.get("name", "")), str(v.get("value", "")), str(v.get("unit", "") or ""))
-        for v in data.get("values", []) if v.get("name")
+        ReportValue(" ".join(str(v.get("name", "")).split()), str(v.get("value", "")).strip(),
+                    " ".join(str(v.get("unit", "") or "").split()))
+        for v in data.get("values", []) if isinstance(v, dict) and str(v.get("name") or "").strip()
     ]
-    return ExtractedReport(str(data.get("report_name", "Report")), str(data.get("report_date", "") or ""), values, text)
+    report_date = to_iso_date(data.get("report_date"), date.today().isoformat())
+    return ExtractedReport(str(data.get("report_name") or "Report").strip(), report_date, values, text)
