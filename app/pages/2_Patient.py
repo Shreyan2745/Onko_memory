@@ -43,6 +43,36 @@ STATUS_LABELS = {
     CheckStatus.LATE: "◷ Late",
 }
 
+TYPE_LABELS = {"world": "fact", "experience": "past chat", "observation": "learned pattern"}
+
+
+def render_memory_trace(msg: dict) -> None:
+    """The 🧠 panel under an answer: what was saved (retain) and what was used (reflect)."""
+    trace, saved = msg.get("trace"), msg.get("saved") or []
+    with st.expander("🧠 Memory behind this answer"):
+        for s in saved:
+            st.markdown(f"**Saved** ⬆ `retain` · {s['type']} by {s['source']}  \n{s['text']}")
+        if msg.get("emergency"):
+            st.markdown("**Safety check** ⚠ danger words detected, so OnKo replied instantly without the AI "
+                        "and saved an SOS for your care team.")
+            return
+        if not trace:
+            return
+        if trace.get("offline"):
+            st.caption("Offline mode: Hindsight is not connected.")
+            return
+        facts = trace["facts"]
+        st.markdown(f"**Recalled** ⬇ `reflect` · {len(facts)} memories · {trace['seconds']:.1f}s")
+        for f in facts[:8]:
+            when = f" · {f['when']}" if f["when"] else ""
+            st.markdown(f"- <span class='badge'>{TYPE_LABELS.get(f['type'], f['type'])}</span> {f['text']}"
+                        f"<span style='opacity:.6'>{when}</span>", unsafe_allow_html=True)
+        if len(facts) > 8:
+            st.caption(f"+ {len(facts) - 8} more")
+        if trace["directives"]:
+            st.markdown("**Safety rules applied** · " + " · ".join(trace["directives"]))
+
+
 care_col, chat_col = st.columns([1.55, 1], gap="large")
 
 with care_col:
@@ -50,6 +80,8 @@ with care_col:
         st.markdown('<div class="section-title">♢ Today\'s Care</div><div class="section-sub">Based on your approved care plan</div>', unsafe_allow_html=True)
         existing = db.get_daily_log(patient.id, today)
 
+        if saved_count := st.session_state.pop("saved_log_count", 0):
+            st.toast(f"🧠 {saved_count} new memories saved for OnKo")
         if existing:
             st.success("✓ Today's log is complete")
             st.caption(f"Saved at {existing.submitted_at:%I:%M %p}" if existing.submitted_at else "Saved today")
@@ -90,6 +122,7 @@ with care_col:
                 submitted = st.form_submit_button("☁  Save today's log", type="primary", use_container_width=True)
 
             if submitted:
+                saves_before = len(memory.recent_saves(patient.id, 12))
                 log = DailyLog(patient.id, today, checklist, mood or "", list(symptoms), symptom_note, diary.strip(), visit_note.strip(), datetime.now())
                 db.save_daily_log(log)
                 if checklist:
@@ -101,6 +134,7 @@ with care_col:
                     memory.save_entry(Entry(patient.id, log.diary, role, EntryType.DIARY))
                 if log.visit_note:
                     memory.save_entry(Entry(patient.id, f"Patient's note after appointment: {log.visit_note}", role, EntryType.VISIT_NOTE))
+                st.session_state.saved_log_count = len(memory.recent_saves(patient.id, 12)) - saves_before
                 st.rerun()
 
 with chat_col:
@@ -122,20 +156,47 @@ with chat_col:
 
         history = st.session_state.setdefault("chat_history", [])
         for msg in history:
-            st.chat_message(msg["role"]).markdown(msg["text"])
+            with st.chat_message(msg["role"]):
+                (st.error if msg.get("emergency") else st.markdown)(msg["text"])
+                if msg["role"] == "assistant":
+                    render_memory_trace(msg)
 
         typed = st.chat_input("Ask about your care journey…")
         prompt = typed or st.session_state.pop("pending_prompt", None)
         if prompt:
             history.append({"role": "user", "text": prompt})
             st.chat_message("user").markdown(prompt)
-            with st.chat_message("assistant"), st.spinner("Checking your care memory…"):
+            with st.chat_message("assistant"):
                 try:
-                    reply = chat.handle_message(patient.id, prompt, role)
+                    with st.spinner("Checking your care memory…"):
+                        reply = chat.handle_message(patient.id, prompt, role)
+                    trace = memory.last_trace(patient.id)
+                    msg = {
+                        "role": "assistant", "text": reply.text, "emergency": reply.is_emergency,
+                        "trace": trace if trace and trace["question"] == prompt and not reply.is_emergency else None,
+                        "saved": [s for s in memory.recent_saves(patient.id, 2) if s["type"] in ("chat", "sos")],
+                    }
                     (st.error if reply.is_emergency else st.markdown)(reply.text)
-                    history.append({"role": "assistant", "text": reply.text})
+                    render_memory_trace(msg)
+                    history.append(msg)
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
+
+        with st.expander("🧠 What OnKo has learned about you"):
+            st.caption("Patterns Hindsight found across your records. Nobody typed these in.")
+            if st.button("Show learned patterns", key="load_patterns"):
+                with st.spinner("Reading your memory…"):
+                    try:
+                        st.session_state.learned = memory.learned_patterns(patient.id)
+                    except Exception as e:
+                        st.session_state.learned = []
+                        st.error(f"Could not load patterns: {e}")
+            learned = st.session_state.get("learned")
+            if learned:
+                for pattern in learned:
+                    st.markdown(f"- {pattern}")
+            elif learned is not None:
+                st.caption("No patterns yet. They appear a few minutes after memories are saved.")
 
         st.markdown('<div class="source-chip">CARE MEMORY · patient-specific sources</div>', unsafe_allow_html=True)
         st.caption("OnKo organizes recorded information. Your care team makes medical decisions.")

@@ -16,6 +16,8 @@ import asyncio
 import atexit
 import logging
 import threading
+import time
+from collections import deque
 
 from core import config
 from core.contracts import Entry, Patient
@@ -164,13 +166,34 @@ def _format(entry: Entry) -> str:
     return f"[{entry.type.value} | recorded by {entry.source.value} | {when}]\n{entry.content}"
 
 
+# ─────────────── Memory trace (what the UI's memory panel shows) ───────────────
+# In-process only: the latest saves and the latest answer's sources, per patient.
+_saves: dict[int, deque] = {}
+_traces: dict[int, dict] = {}
+
+
+def _log(line: str) -> None:
+    """Print a Hindsight call to the terminal (visible next to `streamlit run`)."""
+    print(f"[hindsight] {line}", flush=True)
+
+
+def _first_line(text: str, width: int = 90) -> str:
+    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    return line if len(line) <= width else line[: width - 1] + "…"
+
+
 def save_entry(entry: Entry) -> None:
     """Store one Entry in the patient's memory bank."""
     bank_id = bank_id_for(entry.patient_id)
+    _saves.setdefault(entry.patient_id, deque(maxlen=12)).appendleft({
+        "type": entry.type.value, "source": entry.source.value,
+        "when": entry.timestamp, "text": _first_line(entry.content),
+    })
     client = _get_client()
     if client is None:
         _offline_store.setdefault(bank_id, []).append(entry)
         return
+    started = time.time()
     _call(
         "aretain",
         bank_id=bank_id,
@@ -179,6 +202,14 @@ def save_entry(entry: Entry) -> None:
         timestamp=entry.timestamp,
         metadata={"source": entry.source.value, "type": entry.type.value, **entry.metadata},
     )
+    _log(f"retain  → {bank_id} | {entry.type.value} by {entry.source.value} | "
+         f"{_first_line(entry.content, 60)} ({time.time() - started:.1f}s)")
+
+
+def _fact_dict(fact) -> dict:
+    """ReflectFact → plain dict for the UI."""
+    when = (getattr(fact, "occurred_start", None) or "")[:10]
+    return {"type": getattr(fact, "type", None) or "memory", "text": fact.text, "when": when}
 
 
 def ask(patient_id: int, question: str, context: str = "") -> str:
@@ -188,6 +219,42 @@ def ask(patient_id: int, question: str, context: str = "") -> str:
     if client is None:
         recent = _offline_store.get(bank_id, [])[-5:]
         lines = "\n".join(f"- {_format(e)}" for e in recent) or "- (nothing stored yet)"
+        _traces[patient_id] = {"question": question, "facts": [], "directives": [], "seconds": 0.0, "offline": True}
         return f"⚠️ Offline mode (Hindsight not configured). Last things stored:\n{lines}"
-    answer = _call("areflect", bank_id=bank_id, query=question, budget="mid", context=context or None, apply_all_directives=True)
+    started = time.time()
+    answer = _call("areflect", bank_id=bank_id, query=question, budget="mid", context=context or None,
+                   apply_all_directives=True, include_facts=True)
+    based_on = getattr(answer, "based_on", None)
+    facts = [_fact_dict(f) for f in (getattr(based_on, "memories", None) or [])]
+    directives = [d.name for d in (getattr(based_on, "directives", None) or []) if getattr(d, "name", None)]
+    seconds = time.time() - started
+    _traces[patient_id] = {"question": question, "facts": facts, "directives": directives,
+                           "seconds": seconds, "offline": False}
+    kinds = ", ".join(f"{k} {sum(f['type'] == k for f in facts)}" for k in sorted({f["type"] for f in facts}))
+    _log(f"reflect ← {bank_id} | {len(facts)} memories used ({kinds or 'none'}) | "
+         f"{len(directives)} rules | {seconds:.1f}s | Q: {_first_line(question, 50)}")
     return answer.text
+
+
+def recent_saves(patient_id: int, limit: int = 5) -> list[dict]:
+    """Latest entries saved to this patient's memory in this app session (newest first)."""
+    return list(_saves.get(patient_id, []))[:limit]
+
+
+def last_trace(patient_id: int) -> dict | None:
+    """What the latest answer was based on: {question, facts, directives, seconds, offline}."""
+    return _traces.get(patient_id)
+
+
+def learned_patterns(patient_id: int, limit: int = 6) -> list[str]:
+    """Observations Hindsight has consolidated for this patient (patterns nobody typed)."""
+    if _get_client() is None:
+        return []
+    bank_id = bank_id_for(patient_id)
+    started = time.time()
+    resp = _call("arecall", bank_id=bank_id, types=["observation"], budget="low", max_tokens=2048,
+                 query="Recurring patterns in this patient's symptoms, medicine-taking, treatment "
+                       "cycles, preferences and who helps with their care")
+    patterns = [r.text for r in (getattr(resp, "results", None) or [])][:limit]
+    _log(f"recall  ← {bank_id} | {len(patterns)} observations | {time.time() - started:.1f}s")
+    return patterns
