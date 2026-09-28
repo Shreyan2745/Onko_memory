@@ -12,13 +12,18 @@ def main() -> None:
     if not memory.is_online():
         print("✗ Not configured. Set HINDSIGHT_BASE_URL (and HINDSIGHT_API_KEY for Cloud) in .env")
     else:
-        c = memory._get_client()  # shared client, closed cleanly on exit
         bank = f"{config.HINDSIGHT_BANK_PREFIX}-setup-check"
-        c.retain(bank_id=bank, content="Setup check: the team name is 404 Found.", retain_async=False)
+        memory._call("aretain", bank_id=bank, content="Setup check: the team name is 404 Found.", retain_async=False)
         print("✓ retain ok")
-        print("✓ reflect:", c.reflect(bank_id=bank, query="What is the team name?", budget="low").text)
-        memory.ensure_bank(Patient(id=0, name="Setup Check"))
-        print("✓ bank + directives ok")
+        print("✓ reflect:", memory._call("areflect", bank_id=bank, query="What is the team name?", budget="low").text)
+        bank_id = memory.ensure_bank(Patient(id=0, name="Setup Check"))
+        resp = memory._call("alist_directives", bank_id=bank_id)
+        found = {d.name for d in (getattr(resp, "items", None) or resp or [])}
+        missing = set(memory.DIRECTIVES) - found
+        if missing:
+            print(f"✗ directives missing on {bank_id}: {sorted(missing)}")
+        else:
+            print(f"✓ bank + all {len(memory.DIRECTIVES)} directives present ({bank_id})")
 
     print("── Groq ──")
     if not config.GROQ_API_KEY:

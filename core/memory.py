@@ -12,8 +12,10 @@ Docs: https://hindsight.vectorize.io/sdks/python
 
 from __future__ import annotations
 
+import asyncio
 import atexit
 import logging
+import threading
 
 from core import config
 from core.contracts import Entry, Patient
@@ -76,13 +78,35 @@ def _get_client():
     return _client
 
 
+# The Hindsight client's sync methods break when an event loop is already running in
+# the calling thread (which happens inside Streamlit): "This event loop is already running".
+# So every call goes through ONE background thread with its own event loop, using the
+# client's async methods. Same thread + same loop every time = no loop conflicts.
+_loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+
+
+def _call(method: str, **kwargs):
+    """Run client.<method>(**kwargs) (an async 'a...' method) on the Hindsight thread."""
+    global _loop
+    with _loop_lock:
+        if _loop is None:
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, name="hindsight", daemon=True).start()
+    coro = getattr(_get_client(), method)(**kwargs)
+    return asyncio.run_coroutine_threadsafe(coro, _loop).result(timeout=120)
+
+
 @atexit.register
 def close() -> None:
     """Close the Hindsight HTTP session on exit (stops 'Unclosed client session' warnings)."""
     global _client
     if _client is not None:
         try:
-            _client.close()
+            if _loop is not None:
+                _call("aclose")
+            else:
+                _client.close()
         except Exception:
             pass
         _client = None
@@ -104,7 +128,8 @@ def ensure_bank(patient: Patient) -> str:
     if client is None or bank_id in _ready_banks:
         return bank_id
     try:
-        client.create_bank(
+        _call(
+            "acreate_bank",
             bank_id=bank_id,
             name=f"OnKo — {patient.name}",
             mission=MISSION,
@@ -114,14 +139,14 @@ def ensure_bank(patient: Patient) -> str:
     except Exception as e:  # bank probably exists already
         log.info("create_bank skipped for %s: %s", bank_id, e)
     try:
-        resp = client.list_directives(bank_id=bank_id)
+        resp = _call("alist_directives", bank_id=bank_id)
         existing = {d.name for d in (getattr(resp, "items", None) or resp or [])}
     except Exception:
         existing = set()
     for name, content in DIRECTIVES.items():
         if name not in existing:
             try:
-                client.create_directive(bank_id=bank_id, name=name, content=content)
+                _call("acreate_directive", bank_id=bank_id, name=name, content=content)
             except Exception as e:
                 log.warning("create_directive %s failed: %s", name, e)
     _ready_banks.add(bank_id)
@@ -142,7 +167,8 @@ def save_entry(entry: Entry) -> None:
     if client is None:
         _offline_store.setdefault(bank_id, []).append(entry)
         return
-    client.retain(
+    _call(
+        "aretain",
         bank_id=bank_id,
         content=_format(entry),
         context=entry.type.value,
@@ -159,5 +185,5 @@ def ask(patient_id: int, question: str, context: str = "") -> str:
         recent = _offline_store.get(bank_id, [])[-5:]
         lines = "\n".join(f"- {_format(e)}" for e in recent) or "- (nothing stored yet)"
         return f"⚠️ Offline mode (Hindsight not configured). Last things stored:\n{lines}"
-    answer = client.reflect(bank_id=bank_id, query=question, budget="mid", context=context or None, apply_all_directives=True)
+    answer = _call("areflect", bank_id=bank_id, query=question, budget="mid", context=context or None, apply_all_directives=True)
     return answer.text
