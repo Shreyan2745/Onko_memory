@@ -62,6 +62,10 @@ DIRECTIVES: dict[str, str] = {
         "dates, doses or results."
     ),
     "Plain language": "Use short, simple, warm sentences the patient can understand.",
+    "Records only": (
+        "Only cite facts recorded by the doctor, nurse, patient or caregiver. Never cite OnKo's own "
+        "earlier answers ('OnKo answered: ...') as a source, and never treat them as clinical facts."
+    ),
 }
 
 # ─────────────── Client ───────────────
